@@ -11,14 +11,14 @@ public class Workers {
     List<Thread> threads;
     Lock lock;
     Condition taskAvailable;
-    boolean running;
+    volatile boolean running;
 
     public Workers(int numOfThreads) {
        this.numOfThreads = numOfThreads;
        this.tasks = new LinkedList<>();
        this.threads =  new LinkedList<>();
-       this.taskAvailable = lock.newCondition();
        this.lock = new ReentrantLock();
+       this.taskAvailable = lock.newCondition();
        this.running = false;
     }
 
@@ -53,6 +53,7 @@ public class Workers {
         }
     }
 
+    //Will finish tasks in task lists  before stopping
     public void stop() {
         running = false;
         lock.lock();
@@ -77,11 +78,11 @@ public class Workers {
         }
     }
 
-    public void postTimeout(Runnable task, long waitingTime) {
+    public void postTimeout(Runnable task, long waitingTimeInMillis) {
         if (running) {
             Runnable delayedTask = () -> {
                 try {
-                    Thread.sleep(waitingTime);
+                    Thread.sleep(waitingTimeInMillis);
                     task.run();
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
@@ -102,28 +103,41 @@ public class Workers {
         }
     }
 
-    public static void main(String[] args) {
+    public static void main(String[] args)  {
         Workers workerThreads = new Workers(4);
         Workers eventLoop = new Workers(1);
 
         workerThreads.start();
         eventLoop.start();
 
-        workerThreads.post(() -> {
-            System.out.println("Task A");
-        });
+        workerThreads.postTimeout(() -> {
+            System.out.println("Task A"); // Task A
+        }, 3000);
 
         workerThreads.post(() -> {
-            System.out.println("Task B");
+            System.out.println("Task B"); // Task B  // Might run in parallel with task A
+
         });
 
-        eventLoop.post(() -> {
-            System.out.println("Task C");
-        });
+        /*       workerThreads.postTimeout(() -> {
+            System.out.println("Task B"); // Task B wit wait timer  // Might run in parallel with task A
+
+        }, 3000);*/
 
         eventLoop.post(() -> {
-            System.out.println("Task D");
+            System.out.println("Task C"); // Task C // Might run in parallel with task A and B
         });
+
+
+    /*    workerThreads.stop();
+        eventLoop.stop();*/
+
+
+
+        eventLoop.post(() -> {
+            System.out.println("Task D"); // Task D // Will run after task C // Might run in parallel with task A and B
+        });
+
 
         workerThreads.join();
         eventLoop.join();
