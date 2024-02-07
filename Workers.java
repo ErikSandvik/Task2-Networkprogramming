@@ -6,32 +6,49 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
 
 public class Workers {
+    //List to store worker threads
     List<Thread> threads;
-    List<Runnable> tasks;
-    Object lock;
+
+    //Queue of runnable tasks
+    Queue<Runnable> tasks;
+
+    //Lock and condition variables to avoid concurrency issues
+    Lock lock;
+    Condition taskAvailable;
+
+
     volatile boolean running;
 
+    //Constructor that makes a specific number of threads
     public Workers(int numOfThreads) {
         threads = new LinkedList<>();
         tasks = new LinkedList<>();
-        this.lock = new Object();
+        this.lock = new ReentrantLock();
+        this.taskAvailable = lock.newCondition();
         this.running = false;
 
+        //Creating the threads
         for (int i = 0; i < numOfThreads; i++) {
             Thread workerThread = new Thread(() -> {
                 while (running || !tasks.isEmpty()) {
                     try {
                         Runnable task;
-                        synchronized (lock) {
+                        lock.lock();
+                        try {
+                            //If there are no tasks, then wait and wait for signal for a task being available
                             while (tasks.isEmpty() && running) {
-                                lock.wait();
+                                taskAvailable.await();
                             }
+
+                            //Retrieves a task from queue
                             if (!tasks.isEmpty()) {
-                                task = tasks.remove(0);
-                            }
-                            else {
+                                task = tasks.remove();
+                            } else {
+                                //Terminates if there are no more tasks
                                 break;
                             }
+                        } finally {
+                            lock.unlock();
                         }
 
                         task.run();
@@ -41,6 +58,7 @@ public class Workers {
                 }
             });
 
+            //Add the thread to the list of threads. Pool?
             threads.add(workerThread);
         }
     }
@@ -54,11 +72,14 @@ public class Workers {
         }
     }
 
-
+    //Change running boolean value to false, and then notify all threads waiting for signal from condition variable
     public void stop() {
         running = false;
-        synchronized (lock) {
-            lock.notifyAll();  // Wake up all threads to check the running flag
+        lock.lock();
+        try {
+            taskAvailable.signalAll();
+        } finally {
+            lock.unlock();
         }
 
         for (Thread thread : threads) {
@@ -70,15 +91,20 @@ public class Workers {
         }
     }
 
+    //Posts a task to the available pool of tasks
     public void post(Runnable task) {
         if (running) {
-            synchronized (lock) {
+            lock.lock();
+            try {
                 tasks.add(task);
-                lock.notify();  // Wake up one waiting thread to execute the task
+                taskAvailable.signal();
+            } finally {
+                lock.unlock();
             }
         }
     }
 
+    //Adds a task that takes a delay in the run() method
     public void postTimeout(Runnable task, long waitingTimeInMillis) {
         if (running) {
             Runnable delayedTask = () -> {
@@ -94,6 +120,7 @@ public class Workers {
         }
     }
 
+    //Join all tasks in thread list
     public void join() {
         for (Thread thread : threads) {
             try {
@@ -114,6 +141,11 @@ public class Workers {
         workerThreads.post(() -> {
             System.out.println("Task A"); // Task A
         });
+
+
+        /*     workerThreads.postTimeout(() -> {
+            System.out.println("Task A"); // Task A
+        }, 2000);*/
 
         workerThreads.post(() -> {
             System.out.println("Task B"); // Task B  // Might run in parallel with task A
